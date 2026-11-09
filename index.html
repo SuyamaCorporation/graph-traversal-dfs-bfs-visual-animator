@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>グラフ探索 DFS/BFS ビジュアライザー</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex flex-col items-center p-4">
+<h1 class="text-xl font-bold mb-1 text-center">🔍 グラフ探索 DFS/BFS アニメーター</h1>
+<p class="text-gray-400 text-sm mb-4 text-center">ノードをクリックして始点を選択、DFS/BFSを可視化</p>
+
+<div class="w-full max-w-3xl">
+  <div class="bg-gray-800 rounded-xl p-3 mb-3 flex flex-wrap gap-3 items-center">
+    <div class="flex gap-2">
+      <button id="btnDFS" class="algo-btn bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded text-sm font-bold transition ring-2 ring-blue-400">DFS</button>
+      <button id="btnBFS" class="algo-btn bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm font-bold transition">BFS</button>
+    </div>
+    <button id="btnRun" class="bg-green-600 hover:bg-green-500 px-4 py-2 rounded text-sm font-bold transition">▶ 実行</button>
+    <button id="btnReset" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm font-bold transition">↺ リセット</button>
+    <button id="btnRandom" class="bg-purple-700 hover:bg-purple-600 px-4 py-2 rounded text-sm font-bold transition">🔀 新グラフ</button>
+    <label class="text-xs text-gray-400 flex items-center gap-1">
+      速度:
+      <input id="speed" type="range" min="1" max="5" value="3" class="w-20">
+    </label>
+    <div class="text-xs text-gray-500">始点: <span id="startLabel" class="text-blue-300 font-bold">-</span></div>
+  </div>
+
+  <div class="bg-gray-800 rounded-xl p-2 mb-3">
+    <canvas id="canvas" width="600" height="360" class="w-full rounded cursor-pointer"></canvas>
+  </div>
+
+  <div class="grid grid-cols-2 gap-3">
+    <div class="bg-gray-800 rounded-xl p-3">
+      <div class="text-xs font-bold text-gray-400 mb-2">訪問順序</div>
+      <div id="visitOrder" class="text-xs font-mono text-green-300 min-h-8"></div>
+    </div>
+    <div class="bg-gray-800 rounded-xl p-3">
+      <div class="text-xs font-bold text-gray-400 mb-2">スタック/キュー</div>
+      <div id="stackQueue" class="text-xs font-mono text-yellow-300 min-h-8"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let nodes=[], edges=[], algo='DFS', startNode=-1, animTimer=null;
+let visited=[], visitOrder=[], colors={};
+const NODE_R=22;
+const NODE_COLORS={unvisited:'#374151',queued:'#854d0e',current:'#1d4ed8',visited:'#065f46'};
+
+function genGraph(n=8, density=0.35){
+  const W=580, H=340, margin=40;
+  nodes=[];
+  for(let i=0;i<n;i++){
+    // Try to place non-overlapping
+    let x,y,ok; let tries=0;
+    do{ x=margin+Math.random()*(W-2*margin); y=margin+Math.random()*(H-2*margin);
+      ok=nodes.every(nd=>Math.hypot(nd.x-x,nd.y-y)>NODE_R*2.5);
+    }while(!ok&&++tries<50);
+    nodes.push({x,y,id:i,label:String.fromCharCode(65+i)});
+  }
+  edges=[];
+  // Ensure connected: chain first
+  const perm=[...Array(n).keys()].sort(()=>Math.random()-0.5);
+  for(let i=0;i<n-1;i++) edges.push([perm[i],perm[i+1]]);
+  // Random extra edges
+  for(let a=0;a<n;a++) for(let b=a+1;b<n;b++){
+    if(edges.some(e=>(e[0]===a&&e[1]===b)||(e[0]===b&&e[1]===a))) continue;
+    if(Math.random()<density) edges.push([a,b]);
+  }
+  reset();
+}
+
+function reset(){
+  if(animTimer){ clearTimeout(animTimer); animTimer=null; }
+  startNode=-1;
+  visited=[]; visitOrder=[]; colors={};
+  nodes.forEach(n=>{ colors[n.id]='unvisited'; });
+  document.getElementById('startLabel').textContent='-';
+  document.getElementById('visitOrder').textContent='';
+  document.getElementById('stackQueue').textContent='';
+  draw();
+}
+
+function getAdj(id){ return edges.flatMap(e=>e[0]===id?[e[1]]:e[1]===id?[e[0]]:[]).sort(); }
+
+function runAlgo(){
+  if(startNode<0){ alert('ノードをクリックして始点を選んでください'); return; }
+  if(animTimer){ clearTimeout(animTimer); animTimer=null; }
+  visited=[]; visitOrder=[];
+  nodes.forEach(n=>{ colors[n.id]='unvisited'; });
+  const delay=[400,250,150,80,30][parseInt(document.getElementById('speed').value)-1];
+  const steps=[];
+  if(algo==='DFS'){
+    const vis=new Set();
+    function dfs(id,stack){
+      vis.add(id);
+      steps.push({type:'visit',id,stack:[...stack]});
+      for(const nb of getAdj(id)){
+        if(!vis.has(nb)){
+          vis.add(nb);
+          steps.push({type:'queue',id:nb,stack:[...stack,nb]});
+          dfs(nb,[...stack,nb]);
+        }
+      }
+    }
+    steps.push({type:'queue',id:startNode,stack:[startNode]});
+    dfs(startNode,[startNode]);
+  } else {
+    const vis=new Set([startNode]);
+    const queue=[startNode];
+    steps.push({type:'queue',id:startNode,stack:[...queue]});
+    while(queue.length){
+      const id=queue.shift();
+      steps.push({type:'visit',id,stack:[...queue]});
+      for(const nb of getAdj(id)){
+        if(!vis.has(nb)){ vis.add(nb); queue.push(nb); steps.push({type:'queue',id:nb,stack:[...queue]}); }
+      }
+    }
+  }
+  let si=0;
+  function step(){
+    if(si>=steps.length){ draw(); return; }
+    const s=steps[si++];
+    if(s.type==='visit'){
+      colors[s.id]='visited'; visitOrder.push(nodes[s.id].label);
+      document.getElementById('visitOrder').textContent=visitOrder.join(' → ');
+    } else {
+      if(colors[s.id]==='unvisited') colors[s.id]='queued';
+    }
+    colors[s.id]=s.type==='visit'?'visited':(colors[s.id]==='visited'?'visited':'queued');
+    document.getElementById('stackQueue').textContent=`[${s.stack.map(id=>nodes[id].label).join(', ')}]`;
+    draw();
+    animTimer=setTimeout(step,delay);
+  }
+  step();
+}
+
+function draw(){
+  const cv=document.getElementById('canvas');
+  const ctx=cv.getContext('2d');
+  const W=cv.width, H=cv.height;
+  ctx.fillStyle='#111827'; ctx.fillRect(0,0,W,H);
+  // Edges
+  ctx.strokeStyle='#4b5563'; ctx.lineWidth=2;
+  for(const [a,b] of edges){
+    ctx.beginPath(); ctx.moveTo(nodes[a].x,nodes[a].y); ctx.lineTo(nodes[b].x,nodes[b].y); ctx.stroke();
+  }
+  // Nodes
+  for(const nd of nodes){
+    const col=NODE_COLORS[colors[nd.id]||'unvisited'];
+    ctx.beginPath(); ctx.arc(nd.x,nd.y,NODE_R,0,Math.PI*2);
+    ctx.fillStyle=nd.id===startNode?'#1e40af':col; ctx.fill();
+    ctx.strokeStyle=nd.id===startNode?'#60a5fa':'#6b7280'; ctx.lineWidth=2; ctx.stroke();
+    ctx.fillStyle='#f9fafb'; ctx.font='bold 14px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(nd.label,nd.x,nd.y);
+  }
+}
+
+document.getElementById('canvas').addEventListener('click',e=>{
+  const cv=e.target; const rect=cv.getBoundingClientRect();
+  const sx=cv.width/rect.width, sy=cv.height/rect.height;
+  const mx=(e.clientX-rect.left)*sx, my=(e.clientY-rect.top)*sy;
+  const nd=nodes.find(n=>Math.hypot(n.x-mx,n.y-my)<NODE_R);
+  if(nd){ startNode=nd.id; document.getElementById('startLabel').textContent=nd.label; visited=[]; visitOrder=[]; nodes.forEach(n=>colors[n.id]='unvisited'); draw(); }
+});
+document.getElementById('btnDFS').addEventListener('click',()=>{
+  algo='DFS';
+  document.getElementById('btnDFS').classList.add('ring-2','ring-blue-400');
+  document.getElementById('btnBFS').classList.remove('ring-2','ring-blue-400');
+});
+document.getElementById('btnBFS').addEventListener('click',()=>{
+  algo='BFS';
+  document.getElementById('btnBFS').classList.add('ring-2','ring-blue-400');
+  document.getElementById('btnDFS').classList.remove('ring-2','ring-blue-400');
+});
+document.getElementById('btnRun').addEventListener('click',runAlgo);
+document.getElementById('btnReset').addEventListener('click',reset);
+document.getElementById('btnRandom').addEventListener('click',()=>genGraph(8,0.35));
+
+genGraph(8,0.35);
+</script>
+</body>
+</html>
